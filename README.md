@@ -4,7 +4,7 @@ Studio voix « Essayons de comprendre » : un service hébergé, exposé à Clau
 
 ```
 Claude ──MCP (OAuth 2.1)──▶ API /v1 + serveur MCP (Fly) ──HTTP──▶ worker GPU Chatterbox (Modal)
-   │                              │  ffmpeg, Postgres (Neon)            │
+   │                              │  ffmpeg, Postgres (Fly)            │
    └──── URL signées (canal A) ───┴──── stockage Tigris ◀───────────────┘
          ou releases GitHub (canal B)
 ```

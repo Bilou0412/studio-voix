@@ -25,7 +25,7 @@ jobs:
           OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
         run: |
           missing=""
-          for k in FLY_API_TOKEN MODAL_TOKEN_ID MODAL_TOKEN_SECRET DATABASE_URL OWNER_PASSWORD; do
+          for k in FLY_API_TOKEN MODAL_TOKEN_ID MODAL_TOKEN_SECRET OWNER_PASSWORD; do
             [ -n "${!k}" ] || missing="$missing $k"
           done
           if [ -n "$missing" ]; then echo "::error::secrets manquants :$missing (voir DEPLOIEMENT.md)"; exit 1; fi
@@ -45,6 +45,18 @@ jobs:
             flyctl storage create -a "$APP" -n "$APP-media" -y
           fi
 
+      # Postgres chez Fly (non géré, une machine shared-cpu-1x et 1 Go, quelques dollars par mois),
+      # sauf si un secret DATABASE_URL pointe vers une autre base.
+      - name: Créer la base Postgres Fly si absente
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ] && ! flyctl secrets list -a "$APP" | grep -q DATABASE_URL; then
+            flyctl postgres create --name "$APP-db" --org personal --region cdg \
+              --vm-size shared-cpu-1x --volume-size 1 --initial-cluster-size 1
+            flyctl postgres attach "$APP-db" -a "$APP"
+          fi
+
       - name: Poser les secrets de l'application
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -53,7 +65,8 @@ jobs:
           EXPORTS_REPO: ${{ vars.EXPORTS_REPO || 'Bilou0412/essayons-studio-exports' }}
         run: |
           existing=$(flyctl secrets list -a "$APP")
-          args=("DATABASE_URL=$DATABASE_URL" "OWNER_PASSWORD=$OWNER_PASSWORD" "PUBLIC_URL=https://$APP.fly.dev")
+          args=("OWNER_PASSWORD=$OWNER_PASSWORD" "PUBLIC_URL=https://$APP.fly.dev")
+          [ -n "$DATABASE_URL" ] && args+=("DATABASE_URL=$DATABASE_URL")
           # Secrets générés une fois, jamais affichés.
           echo "$existing" | grep -q TOKEN_SECRET || args+=("TOKEN_SECRET=$(openssl rand -hex 32)")
           echo "$existing" | grep -q API_KEY || args+=("API_KEY=$(openssl rand -hex 32)")
