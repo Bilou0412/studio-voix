@@ -1,0 +1,84 @@
+# Déploie tout depuis GitHub : l'application Fly (API + MCP + ffmpeg), son stockage Tigris,
+# et le worker GPU sur Modal. Rien à installer sur un PC : seuls les secrets du dépôt sont à remplir.
+name: deploy
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      APP: ${{ vars.FLY_APP || 'studio-voix-bilel' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier les secrets du dépôt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+        run: |
+          missing=""
+          for k in FLY_API_TOKEN MODAL_TOKEN_ID MODAL_TOKEN_SECRET DATABASE_URL OWNER_PASSWORD; do
+            [ -n "${!k}" ] || missing="$missing $k"
+          done
+          if [ -n "$missing" ]; then echo "::error::secrets manquants :$missing (voir DEPLOIEMENT.md)"; exit 1; fi
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install modal
+
+      - name: Créer l'application Fly si elle n'existe pas
+        run: flyctl status -a "$APP" >/dev/null 2>&1 || flyctl apps create "$APP" --org personal
+
+      - name: Créer le stockage Tigris si absent
+        run: |
+          if ! flyctl secrets list -a "$APP" | grep -q BUCKET_NAME; then
+            flyctl storage create -a "$APP" -n "$APP-media" -y
+          fi
+
+      - name: Poser les secrets de l'application
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+          EXPORTS_GITHUB_TOKEN: ${{ secrets.EXPORTS_GITHUB_TOKEN }}
+          EXPORTS_REPO: ${{ vars.EXPORTS_REPO || 'Bilou0412/essayons-studio-exports' }}
+        run: |
+          existing=$(flyctl secrets list -a "$APP")
+          args=("DATABASE_URL=$DATABASE_URL" "OWNER_PASSWORD=$OWNER_PASSWORD" "PUBLIC_URL=https://$APP.fly.dev")
+          # Secrets générés une fois, jamais affichés.
+          echo "$existing" | grep -q TOKEN_SECRET || args+=("TOKEN_SECRET=$(openssl rand -hex 32)")
+          echo "$existing" | grep -q API_KEY || args+=("API_KEY=$(openssl rand -hex 32)")
+          if ! echo "$existing" | grep -q WORKER_TOKEN; then
+            wt=$(openssl rand -hex 32)
+            args+=("WORKER_TOKEN=$wt")
+            modal secret create studio-voix-worker "WORKER_TOKEN=$wt" --force
+          fi
+          if [ -n "$EXPORTS_GITHUB_TOKEN" ]; then
+            args+=("GITHUB_TOKEN=$EXPORTS_GITHUB_TOKEN" "GITHUB_EXPORTS_REPO=$EXPORTS_REPO")
+          fi
+          flyctl secrets set --stage -a "$APP" "${args[@]}"
+
+      - name: Déployer le worker GPU (Modal)
+        run: |
+          out=$(cd worker && modal deploy modal_app.py 2>&1) || { echo "$out"; exit 1; }
+          echo "$out" | tail -20
+          url=$(echo "$out" | grep -oE 'https://[a-zA-Z0-9.-]+\.modal\.run' | head -1)
+          [ -n "$url" ] || { echo "::error::adresse du worker introuvable dans la sortie de modal deploy"; exit 1; }
+          flyctl secrets set --stage -a "$APP" "WORKER_URL=$url"
+
+      - name: Déployer l'API et le serveur MCP (Fly)
+        run: flyctl deploy --remote-only -a "$APP"
+
+      - name: Vérifier
+        run: |
+          for i in $(seq 1 20); do curl -fsS "https://$APP.fly.dev/healthz" && exit 0; sleep 5; done
+          exit 1
