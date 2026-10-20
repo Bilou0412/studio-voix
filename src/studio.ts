@@ -86,6 +86,18 @@ export interface StudioDeps {
   github?: GithubReleases;
 }
 
+// La voix livrée avec Chatterbox, toujours prête : pour essayer le studio sans échantillon ni consentement.
+export const BUILTIN_VOICE_ID = "voice_defaut";
+const BUILTIN_VOICE = { id: BUILTIN_VOICE_ID, name: "defaut", language: "fr", status: "ready", builtin: true };
+const BUILTIN_VOICE_VIEW = {
+  voice_id: BUILTIN_VOICE_ID,
+  name: "Voix intégrée du modèle (pas un clone)",
+  language: "fr",
+  status: "ready",
+  builtin: true,
+  references: [],
+};
+
 export class Studio {
   config: Config;
   db: Db;
@@ -394,7 +406,7 @@ export class Studio {
     const voices = await this.db.query("SELECT * FROM voice ORDER BY created_at");
     const refs = await this.db.query("SELECT * FROM voice_reference ORDER BY created_at");
     return {
-      voices: voices.rows.map((v: any) => ({
+      voices: [BUILTIN_VOICE_VIEW, ...voices.rows.map((v: any) => ({
         voice_id: v.id,
         name: v.name,
         language: v.language,
@@ -406,7 +418,7 @@ export class Studio {
         references: refs.rows
           .filter((r: any) => r.voice_id === v.id)
           .map((r: any) => ({ reference_id: r.id, tag: r.tag, duration_s: r.duration_s, media_id: r.media_id, clean_media_id: r.clean_media_id })),
-      })),
+      }))],
     };
   }
 
@@ -439,6 +451,7 @@ export class Studio {
   }
 
   private async getVoice(id: string) {
+    if (id === BUILTIN_VOICE_ID) return BUILTIN_VOICE;
     const { rows } = await this.db.query("SELECT * FROM voice WHERE id = $1", [id]);
     if (!rows[0]) throw new ApiError("voice_not_found", `voix ${id} introuvable`, "voice_list donne les voix existantes");
     return rows[0];
@@ -660,16 +673,17 @@ export class Studio {
   ) {
     const toneName = toneFromHint(input.tone);
     const tone = TONES[toneName];
-    const ref = await this.pickReference(voice, input.reference_id, tone.reference_tag);
-    const refMedia = await this.getMediaRow(ref.clean_media_id ?? ref.media_id);
     const ttl = this.config.signedUrlTtlSeconds;
+    // La voix intégrée n'a pas de référence : le worker garde la voix livrée avec le modèle.
+    const ref = voice.builtin ? null : await this.pickReference(voice, input.reference_id, tone.reference_tag);
+    const refMedia = ref ? await this.getMediaRow(ref.clean_media_id ?? ref.media_id) : null;
     const mediaId = newId("med");
     const key = `gen/${mediaId}.wav`;
     const params = {
       model: "chatterbox-multilingual",
       language: voice.language,
       seed: input.seed ?? randomInt(0, 2 ** 31 - 1),
-      reference_id: ref.id,
+      reference_id: ref?.id ?? null,
       tone: toneName,
       exaggeration: input.overrides?.exaggeration ?? tone.exaggeration,
       cfg_weight: input.overrides?.cfg_weight ?? tone.cfg_weight,
@@ -678,7 +692,7 @@ export class Studio {
     const res = await this.synth!.synthesize({
       text: input.text,
       language: voice.language,
-      reference_url: await this.store.signedGetUrl(refMedia.storage_key, ttl),
+      reference_url: refMedia ? await this.store.signedGetUrl(refMedia.storage_key, ttl) : undefined,
       output_put_url: await this.store.signedPutUrl(key, ttl, "audio/wav"),
       seed: params.seed,
       exaggeration: params.exaggeration,

@@ -7,7 +7,8 @@ import { ApiError } from "./errors.js";
 export interface SynthesisRequest {
   text: string;
   language: string;
-  reference_url: string;
+  // Absente pour la voix intégrée du modèle.
+  reference_url?: string;
   output_put_url: string;
   seed: number;
   exaggeration: number;

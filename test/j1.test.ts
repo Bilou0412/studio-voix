@@ -99,9 +99,29 @@ test("création de voix : référence nettoyée, voix prête, phrase test géné
   assert.ok(audit.rows.some((r: any) => r.action === "voice_create"));
 });
 
+test("la voix intégrée parle sans échantillon ni référence", async () => {
+  const voices = await t.api("GET", "/v1/voices");
+  assert.deepEqual(voices.body.voices[0], {
+    voice_id: "voice_defaut",
+    name: "Voix intégrée du modèle (pas un clone)",
+    language: "fr",
+    status: "ready",
+    builtin: true,
+    references: [],
+  });
+  const before = t.synth.calls.length;
+  const res = await t.api("POST", "/v1/voices/voice_defaut/preview", { text: "Bonjour." });
+  assert.equal(res.status, 202);
+  const job = await t.api("GET", `/v1/jobs/${res.body.job_id}?wait=25`);
+  assert.equal(job.body.status, "succeeded", JSON.stringify(job.body));
+  assert.equal(job.body.result.params.reference_id, null);
+  assert.equal(t.synth.calls[before].reference_url, undefined);
+  assert.equal(job.body.result.url.length > 0, true);
+});
+
 test("aperçu d'un bloc : réglages du ton, mesure de vitesse et de coût, variante MP3", async () => {
   const voices = await t.api("GET", "/v1/voices");
-  const v = voices.body.voices.find((x: any) => x.status === "ready");
+  const v = voices.body.voices.find((x: any) => x.status === "ready" && !x.builtin);
   const res = await t.api("POST", `/v1/voices/${v.voice_id}/preview`, { text: "J'avais une théorie. En fait, non.", tone: "[calme, intime]", seed: 42 });
   assert.equal(res.status, 202);
   const job = await t.api("GET", `/v1/jobs/${res.body.job_id}?wait=25`);
