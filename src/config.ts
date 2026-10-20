@@ -9,7 +9,7 @@ export interface Config {
   storage:
     | { kind: "s3"; bucket: string; endpoint?: string; region: string; publicBase?: string }
     | { kind: "local"; dir: string };
-  worker: { url?: string; token?: string };
+  worker: { url?: string; token?: string; timeoutSeconds: number };
   gpuEurPerSecond: number;
   gpuDailyCapEur: number;
   github?: { token: string; repo: string };
@@ -37,7 +37,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           publicBase: env.MEDIA_PUBLIC_BASE,
         }
       : { kind: "local", dir: env.LOCAL_STORAGE_DIR ?? ".data/objects" },
-    worker: { url: env.WORKER_URL, token: env.WORKER_TOKEN },
+    worker: { url: env.WORKER_URL, token: env.WORKER_TOKEN, timeoutSeconds: Number(env.WORKER_TIMEOUT_SECONDS ?? 1800) },
     gpuEurPerSecond: Number(env.GPU_EUR_PER_SECOND ?? 0.00025),
     gpuDailyCapEur: Number(env.GPU_DAILY_CAP_EUR ?? 10),
     github:

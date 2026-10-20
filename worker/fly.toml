@@ -1,0 +1,22 @@
+# Worker CPU de synthèse : joignable seulement depuis le réseau privé (Flycast), éteint au repos.
+# Le nom de l'application est donné au déploiement (-a <app>-worker).
+app = "studio-voix-worker"
+primary_region = "cdg"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 1
+    hard_limit = 4
+
+[[vm]]
+  size = "performance-8x"
+  memory = "16gb"

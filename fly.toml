@@ -8,6 +8,9 @@ primary_region = "cdg"
   PORT = "8080"
   JOB_CONCURRENCY = "2"
   GPU_DAILY_CAP_EUR = "10"
+  # Worker CPU Fly (performance-8x) : environ 0,36 € par heure de calcul, à caler sur la facture.
+  GPU_EUR_PER_SECOND = "0.0001"
+  WORKER_TIMEOUT_SECONDS = "1800"
 
 [http_service]
   internal_port = 8080
