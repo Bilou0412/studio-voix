@@ -23,5 +23,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install num2words==0.5.14 numpy pytest
-      - run: cd worker && pytest -q test_textprep.py
+      - run: pip install num2words==0.5.14 numpy pytest "fastapi[standard]" httpx
+      - run: cd worker && pytest -q

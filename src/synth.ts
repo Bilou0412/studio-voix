@@ -1,8 +1,9 @@
 import type { Config } from "./config.js";
 import { ApiError } from "./errors.js";
 
-// Le contrat entre l'API et le worker GPU (worker/modal_app.py). Le worker lit la référence
-// par URL signée, écrit le WAV par URL signée, et rend sa mesure de temps GPU.
+// Le contrat entre l'API et le worker de synthèse (worker/engine.py, servi par Fly en CPU ou Modal
+// en GPU). Le worker lit la référence par URL signée, écrit le WAV par URL signée, et rend sa
+// mesure de temps de calcul (gpu_seconds, même en CPU).
 export interface SynthesisRequest {
   text: string;
   language: string;
@@ -31,32 +32,41 @@ export class HttpSynthesizer implements Synthesizer {
   constructor(
     private url: string,
     private token: string,
+    private timeoutMs = 15 * 60 * 1000,
   ) {}
   async synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
     let res: Response;
+    let text: string;
     try {
       res = await fetch(this.url, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
         body: JSON.stringify(req),
-        signal: AbortSignal.timeout(15 * 60 * 1000),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
+      text = await res.text();
     } catch (e) {
-      throw new ApiError("gpu_unavailable", `worker GPU injoignable : ${(e as Error).message}`, "réessayer dans une minute");
+      throw new ApiError("gpu_unavailable", `worker de synthèse injoignable : ${(e as Error).message}`, "réessayer dans une minute");
     }
-    if (res.status === 422) {
-      const body = await res.json().catch(() => ({}));
-      throw new ApiError("text_too_long", body.detail ?? "texte refusé par le worker");
+    // Le worker Fly répond 200 dès le départ et met une éventuelle erreur dans le corps.
+    let body: any;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
     }
-    if (!res.ok) {
-      throw new ApiError("gpu_unavailable", `worker GPU en erreur ${res.status} : ${(await res.text()).slice(0, 400)}`);
+    const status = body?.error?.status ?? res.status;
+    const detail = body?.error?.detail ?? body?.detail;
+    if (status === 422) throw new ApiError("text_too_long", detail ?? "texte refusé par le worker");
+    if (status >= 300 || !body || body.error) {
+      throw new ApiError("gpu_unavailable", `worker de synthèse en erreur ${status} : ${String(detail ?? text).slice(0, 400)}`);
     }
-    return (await res.json()) as SynthesisResult;
+    return body as SynthesisResult;
   }
 }
 
 export function makeSynthesizer(config: Config): Synthesizer | undefined {
-  if (config.worker.url && config.worker.token) return new HttpSynthesizer(config.worker.url, config.worker.token);
+  if (config.worker.url && config.worker.token) return new HttpSynthesizer(config.worker.url, config.worker.token, config.worker.timeoutSeconds * 1000);
   return undefined;
 }
 

@@ -3,7 +3,7 @@
 Studio voix « Essayons de comprendre » : un service hébergé, exposé à Claude par un connecteur MCP, qui transforme le script-guide en narration avec une voix clonée. Ce dépôt en est à son **jalon J1 — la voix parle français**.
 
 ```
-Claude ──MCP (OAuth 2.1)──▶ API /v1 + serveur MCP (Fly) ──HTTP──▶ worker GPU Chatterbox (Modal)
+Claude ──MCP (OAuth 2.1)──▶ API /v1 + serveur MCP (Fly) ──HTTP──▶ worker Chatterbox (Fly CPU, ou Modal GPU)
    │                              │  ffmpeg, Postgres (Fly)            │
    └──── URL signées (canal A) ───┴──── stockage Tigris ◀───────────────┘
          ou releases GitHub (canal B)
@@ -24,7 +24,7 @@ Claude ──MCP (OAuth 2.1)──▶ API /v1 + serveur MCP (Fly) ──HTTP─�
 
 Règles communes en place : clé d'idempotence sur tout ce qui crée, erreurs `{code, message, retryable, hint}`, plafond GPU par jour (`quota_exceeded`), journal d'audit des voix, portée `voices:write` accordée seulement si tu coches la case sur la page d'autorisation.
 
-Le worker GPU ([`worker/modal_app.py`](worker/modal_app.py)) prépare le texte (crochets retirés, nombres en lettres, une phrase par segment de 250 caractères au plus), synthétise avec Chatterbox Multilingual (`language_id="fr"`, seed enregistrée, filigrane Perth conservé), recolle les segments avec un fondu de 20 ms et une pause de 0,15 à 0,3 s selon la ponctuation.
+Le worker ([`worker/engine.py`](worker/engine.py), servi sur Fly en CPU par [`worker/server.py`](worker/server.py) ou sur Modal en GPU par [`worker/modal_app.py`](worker/modal_app.py)) prépare le texte (crochets retirés, nombres en lettres, une phrase par segment de 250 caractères au plus), synthétise avec Chatterbox Multilingual (`language_id="fr"`, seed enregistrée, filigrane Perth conservé), recolle les segments avec un fondu de 20 ms et une pause de 0,15 à 0,3 s selon la ponctuation.
 
 ## Le test de J1
 

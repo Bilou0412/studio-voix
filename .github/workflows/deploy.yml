@@ -1,5 +1,6 @@
-# Déploie tout depuis GitHub : l'application Fly (API + MCP + ffmpeg), son stockage Tigris,
-# et le worker GPU sur Modal. Rien à installer sur un PC : seuls les secrets du dépôt sont à remplir.
+# Déploie tout depuis GitHub : l'application Fly (API + MCP + ffmpeg), son stockage Tigris, sa base,
+# et le worker de synthèse : sur Fly en CPU par défaut, sur Modal en GPU si la variable de dépôt
+# WORKER_BACKEND vaut « modal ». Rien à installer sur un PC : seuls les secrets du dépôt sont à remplir.
 name: deploy
 on:
   workflow_dispatch:
@@ -16,6 +17,7 @@ jobs:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       APP: ${{ vars.FLY_APP || 'studio-voix-bilel' }}
+      WORKER_BACKEND: ${{ vars.WORKER_BACKEND || 'fly' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,16 +27,20 @@ jobs:
           OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
         run: |
           missing=""
-          for k in FLY_API_TOKEN MODAL_TOKEN_ID MODAL_TOKEN_SECRET OWNER_PASSWORD; do
+          need="FLY_API_TOKEN OWNER_PASSWORD"
+          [ "$WORKER_BACKEND" = modal ] && need="$need MODAL_TOKEN_ID MODAL_TOKEN_SECRET"
+          for k in $need; do
             [ -n "${!k}" ] || missing="$missing $k"
           done
           if [ -n "$missing" ]; then echo "::error::secrets manquants :$missing (voir DEPLOIEMENT.md)"; exit 1; fi
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - uses: actions/setup-python@v5
+        if: env.WORKER_BACKEND == 'modal'
         with:
           python-version: "3.11"
-      - run: pip install modal
+      - if: env.WORKER_BACKEND == 'modal'
+        run: pip install modal
 
       - name: Créer l'application Fly si elle n'existe pas
         run: flyctl status -a "$APP" >/dev/null 2>&1 || flyctl apps create "$APP" --org personal
@@ -70,23 +76,35 @@ jobs:
           # Secrets générés une fois, jamais affichés.
           echo "$existing" | grep -q TOKEN_SECRET || args+=("TOKEN_SECRET=$(openssl rand -hex 32)")
           echo "$existing" | grep -q API_KEY || args+=("API_KEY=$(openssl rand -hex 32)")
-          if ! echo "$existing" | grep -q WORKER_TOKEN; then
-            wt=$(openssl rand -hex 32)
-            args+=("WORKER_TOKEN=$wt")
-            modal secret create studio-voix-worker "WORKER_TOKEN=$wt" --force
-          fi
           if [ -n "$EXPORTS_GITHUB_TOKEN" ]; then
             args+=("GITHUB_TOKEN=$EXPORTS_GITHUB_TOKEN" "GITHUB_EXPORTS_REPO=$EXPORTS_REPO")
           fi
           flyctl secrets set --stage -a "$APP" "${args[@]}"
 
-      - name: Déployer le worker GPU (Modal)
+      # Le jeton entre l'API et le worker est renouvelé à chaque déploiement, des deux côtés.
+      - name: Déployer le worker CPU (Fly)
+        if: env.WORKER_BACKEND == 'fly'
         run: |
+          W="$APP-worker"
+          flyctl status -a "$W" >/dev/null 2>&1 || flyctl apps create "$W" --org personal
+          # Adresse privée seulement (Flycast) : le worker n'est pas exposé sur Internet.
+          flyctl ips list -a "$W" | grep -qi private || flyctl ips allocate-v6 --private -a "$W"
+          wt=$(openssl rand -hex 32)
+          flyctl secrets set --stage -a "$W" "WORKER_TOKEN=$wt"
+          (cd worker && flyctl deploy . -a "$W" --remote-only --no-public-ips --ha=false)
+          flyctl secrets set --stage -a "$APP" "WORKER_TOKEN=$wt" "WORKER_URL=http://$W.flycast/synthesize"
+
+      - name: Déployer le worker GPU (Modal)
+        if: env.WORKER_BACKEND == 'modal'
+        run: |
+          wt=$(openssl rand -hex 32)
+          modal secret create studio-voix-worker "WORKER_TOKEN=$wt" --force
           out=$(cd worker && modal deploy modal_app.py 2>&1) || { echo "$out"; exit 1; }
           echo "$out" | tail -20
           url=$(echo "$out" | grep -oE 'https://[a-zA-Z0-9.-]+\.modal\.run' | head -1)
           [ -n "$url" ] || { echo "::error::adresse du worker introuvable dans la sortie de modal deploy"; exit 1; }
-          flyctl secrets set --stage -a "$APP" "WORKER_URL=$url"
+          flyctl secrets set --stage -a "$APP" "WORKER_TOKEN=$wt" "WORKER_URL=$url" \
+            "GPU_EUR_PER_SECOND=0.00025" "WORKER_TIMEOUT_SECONDS=900"
 
       - name: Déployer l'API et le serveur MCP (Fly)
         run: flyctl deploy --remote-only -a "$APP"
