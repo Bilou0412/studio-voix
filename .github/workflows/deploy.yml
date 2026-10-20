@@ -88,7 +88,7 @@ jobs:
           W="$APP-worker"
           flyctl status -a "$W" >/dev/null 2>&1 || flyctl apps create "$W" --org personal
           # Adresse privée seulement (Flycast) : le worker n'est pas exposé sur Internet.
-          flyctl ips list -a "$W" | grep -qi private || flyctl ips allocate-v6 --private -a "$W"
+          flyctl ips list -a "$W" --json | grep -q private_v6 || flyctl ips allocate-v6 --private -a "$W"
           wt=$(openssl rand -hex 32)
           flyctl secrets set --stage -a "$W" "WORKER_TOKEN=$wt"
           (cd worker && flyctl deploy . -a "$W" --remote-only --no-public-ips --ha=false)
