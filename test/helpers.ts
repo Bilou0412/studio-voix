@@ -29,8 +29,10 @@ export class FakeSynth implements Synthesizer {
   calls: SynthesisRequest[] = [];
   async synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
     this.calls.push(req);
-    const ref = await fetch(req.reference_url);
-    if (!ref.ok) throw new Error(`référence illisible : ${ref.status}`);
+    if (req.reference_url) {
+      const ref = await fetch(req.reference_url);
+      if (!ref.ok) throw new Error(`référence illisible : ${ref.status}`);
+    }
     const seconds = Math.max(1, req.text.length / 15);
     const dir = mkdtempSync(path.join(tmpdir(), "sv-synth-"));
     const f = path.join(dir, "o.wav");

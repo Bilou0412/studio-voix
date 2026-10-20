@@ -17,6 +17,7 @@ from textprep import pause_after, segments
 
 CHATTERBOX_VERSION = "0.1.7"
 MAX_SEGMENTS = 40
+_BUILTIN: dict = {}
 
 
 class TextRejected(Exception):
@@ -24,9 +25,14 @@ class TextRejected(Exception):
 
 
 def load_model(device: str):
+    import copy
+
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-    return ChatterboxMultilingualTTS.from_pretrained(device=device)
+    model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+    # La voix intégrée, gardée à part : prepare_conditionals remplace model.conds à chaque voix clonée.
+    _BUILTIN["conds"] = copy.deepcopy(model.conds)
+    return model
 
 
 def synthesize(model, body: dict) -> dict:
@@ -46,10 +52,14 @@ def synthesize(model, body: dict) -> dict:
     torch.manual_seed(seed)
 
     with tempfile.NamedTemporaryFile(suffix=".wav") as ref:
-        ref.write(_get(body["reference_url"]))
-        ref.flush()
         started = time.monotonic()
-        model.prepare_conditionals(ref.name, exaggeration=float(body["exaggeration"]))
+        if body.get("reference_url"):
+            ref.write(_get(body["reference_url"]))
+            ref.flush()
+            model.prepare_conditionals(ref.name, exaggeration=float(body["exaggeration"]))
+        else:
+            # Voix intégrée : les conditionnements livrés avec le modèle (conds.pt).
+            model.conds = _builtin_conds(model)
         pieces = []
         for s in segs:
             wav = model.generate(
@@ -76,6 +86,12 @@ def synthesize(model, body: dict) -> dict:
         "segments": [{"text": s, "duration_s": round(len(p) / model.sr, 3)} for s, p in zip(segs, pieces)],
         "prepared_text": " ".join(segs),
     }
+
+
+def _builtin_conds(model):
+    import copy
+
+    return copy.deepcopy(_BUILTIN["conds"])
 
 
 def token_ok(authorization: str | None, want: str) -> bool:

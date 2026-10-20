@@ -97,14 +97,14 @@ export function buildMcpServer(studio: Studio, ip?: string) {
 
   tool(
     "voice_list",
-    "Liste les voix, leurs références étiquetées par ton et leur statut (processing, ready, failed).",
+    "Liste les voix, leurs références étiquetées par ton et leur statut (processing, ready, failed). La première, voice_defaut, est la voix intégrée du modèle : toujours prête, sans clonage, pour essayer.",
     {},
     (_a, ctx) => studio.voiceList(ctx),
   );
 
   tool(
     "voice_preview",
-    `Fait dire un texte à une voix prête, pour écouter le clone (par défaut la phrase test : « ${PREVIEW_SENTENCE} »). Sert aussi à générer un bloc du script au jalon 1 : text = le texte du bloc (2000 caractères au plus), tone = son indication [calme], [incisif], [vérification], [plus lent]… Asynchrone : rend un job_id ; le résultat de job_status donne media_id, url, durée en secondes, secondes GPU, facteur temps réel et coût en euros.`,
+    `Fait dire un texte à une voix prête (voice_defaut pour la voix intégrée du modèle), pour écouter le clone (par défaut la phrase test : « ${PREVIEW_SENTENCE} »). Sert aussi à générer un bloc du script au jalon 1 : text = le texte du bloc (2000 caractères au plus), tone = son indication [calme], [incisif], [vérification], [plus lent]… Asynchrone : rend un job_id ; le résultat de job_status donne media_id, url, durée en secondes, secondes GPU, facteur temps réel et coût en euros.`,
     {
       voice_id: z.string(),
       reference_id: z.string().optional().describe("Référence à utiliser ; sinon celle qui correspond au ton."),
